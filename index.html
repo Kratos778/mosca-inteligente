@@ -1,0 +1,712 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>Mosca Inteligente</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #1a1a1a;
+      color: #eee;
+      font-family: system-ui, -apple-system, sans-serif;
+      overflow: hidden;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+    header {
+      padding: 10px 14px;
+      background: #111;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid #333;
+    }
+    header h1 { font-size: 1.1rem; }
+    .btn {
+      background: #333;
+      color: #fff;
+      border: none;
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      cursor: pointer;
+    }
+    .btn:active { background: #555; }
+    .btn.danger { background: #8b0000; }
+    .btn.primary { background: #1a5fb4; }
+    #game-area {
+      flex: 1;
+      position: relative;
+      overflow: hidden;
+      background: #2d2d2d;
+    }
+    canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+    #hud {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(0,0,0,0.7);
+      padding: 8px 12px;
+      border-radius: 10px;
+      font-size: 0.8rem;
+      line-height: 1.4;
+      pointer-events: none;
+    }
+    #thought {
+      position: absolute;
+      bottom: 80px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,0.85);
+      color: #ffd700;
+      padding: 12px 18px;
+      border-radius: 12px;
+      max-width: 90%;
+      text-align: center;
+      font-size: 0.95rem;
+      display: none;
+      z-index: 20;
+    }
+    #controls {
+      padding: 12px;
+      background: #111;
+      display: flex;
+      gap: 10px;
+      justify-content: center;
+      flex-wrap: wrap;
+      border-top: 1px solid #333;
+    }
+    #modal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.85);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+    #modal.show { display: flex; }
+    .modal-box {
+      background: #222;
+      padding: 24px;
+      border-radius: 16px;
+      width: 100%;
+      max-width: 400px;
+    }
+    .modal-box h2 { margin-bottom: 12px; }
+    .modal-box input {
+      width: 100%;
+      padding: 10px;
+      margin: 8px 0 16px;
+      border-radius: 8px;
+      border: 1px solid #444;
+      background: #111;
+      color: #fff;
+    }
+    .modal-box p { font-size: 0.85rem; color: #aaa; margin-bottom: 12px; }
+    #death-screen {
+      display: none;
+      position: absolute;
+      inset: 0;
+      background: rgba(0,0,0,0.9);
+      z-index: 30;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+      text-align: center;
+    }
+    #death-screen.show { display: flex; }
+    #death-screen h2 { color: #ff5555; margin-bottom: 12px; }
+    #death-thought {
+      background: #222;
+      padding: 16px;
+      border-radius: 12px;
+      max-width: 90%;
+      margin: 16px 0;
+      color: #ffd700;
+      font-style: italic;
+    }
+    .lives { font-size: 0.9rem; color: #aaa; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🐞 Mosca Inteligente</h1>
+    <button class="btn" id="btn-settings">⚙️</button>
+  </header>
+
+  <div id="game-area">
+    <canvas id="canvas"></canvas>
+    <div id="hud"></div>
+    <div id="thought"></div>
+    <div id="death-screen">
+      <h2>A mosca morreu</h2>
+      <div class="lives">Vida <span id="life-count">1</span></div>
+      <div id="death-thought"></div>
+      <button class="btn primary" id="btn-revive">Nascer de novo</button>
+    </div>
+  </div>
+
+  <div id="controls">
+    <button class="btn danger" id="btn-spray">🧴 Spray</button>
+    <button class="btn" id="btn-window">🪟 Fechar Janela</button>
+    <button class="btn" id="btn-hand">🤚 Mão</button>
+  </div>
+
+  <div id="modal">
+    <div class="modal-box">
+      <h2>Configurações</h2>
+      <p>Cole sua chave da API do Grok (console.x.ai). Sem chave funciona em modo simulado.</p>
+      <input type="password" id="api-key" placeholder="xai-..." />
+      <div style="display:flex; gap:10px;">
+        <button class="btn primary" id="btn-save-key" style="flex:1">Salvar</button>
+        <button class="btn" id="btn-close-modal">Fechar</button>
+      </div>
+      <p style="margin-top:16px; font-size:0.8rem;">
+        Memórias de morte: <span id="mem-count">0</span><br>
+        <button class="btn" id="btn-clear-mem" style="margin-top:8px; font-size:0.8rem">Limpar memórias</button>
+      </p>
+    </div>
+  </div>
+
+  <script>
+    // ===================== CONFIG & STATE =====================
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    let W, H;
+
+    const state = {
+      fly: {
+        x: 0, y: 0,
+        vx: 0, vy: 0,
+        angle: 0,
+        energy: 100,
+        hunger: 30,
+        fear: 0,
+        curiosity: 50,
+        alive: true,
+        target: null,
+        action: 'explorar',
+        thought: ''
+      },
+      objects: [],
+      sprayActive: false,
+      sprayTimer: 0,
+      windowClosed: false,
+      handActive: false,
+      handTimer: 0,
+      life: 1,
+      lastDecision: 0,
+      apiKey: localStorage.getItem('grok_key') || '',
+      memories: JSON.parse(localStorage.getItem('fly_memories') || '[]'),
+      mode: 'simulado' // ou 'grok'
+    };
+
+    // ===================== RESIZE =====================
+    function resize() {
+      W = canvas.width = canvas.offsetWidth * devicePixelRatio;
+      H = canvas.height = canvas.offsetHeight * devicePixelRatio;
+      ctx.scale(devicePixelRatio, devicePixelRatio);
+      canvas.style.width = canvas.offsetWidth + 'px';
+      canvas.style.height = canvas.offsetHeight + 'px';
+    }
+    window.addEventListener('resize', () => {
+      ctx.setTransform(1,0,0,1,0,0);
+      resize();
+      if (state.fly.x === 0) spawnFly();
+    });
+    resize();
+
+    // ===================== OBJECTS =====================
+    function createWorld() {
+      const w = canvas.offsetWidth;
+      const h = canvas.offsetHeight;
+      state.objects = [
+        { type: 'sugar', x: w * 0.2, y: h * 0.7, r: 18, label: '🍬', attract: 80 },
+        { type: 'fruit', x: w * 0.75, y: h * 0.6, r: 22, label: '🍎', attract: 70 },
+        { type: 'light', x: w * 0.5, y: 40, r: 25, label: '💡', attract: 40 },
+        { type: 'trash', x: w * 0.85, y: h * 0.85, r: 20, label: '🗑️', attract: 50 },
+        { type: 'window', x: w * 0.1, y: h * 0.25, r: 30, label: '🪟', attract: 20 }
+      ];
+    }
+
+    function spawnFly() {
+      const w = canvas.offsetWidth;
+      const h = canvas.offsetHeight;
+      state.fly.x = w * 0.5;
+      state.fly.y = h * 0.4;
+      state.fly.vx = (Math.random() - 0.5) * 2;
+      state.fly.vy = (Math.random() - 0.5) * 2;
+      state.fly.energy = 100;
+      state.fly.hunger = 20 + Math.random() * 30;
+      state.fly.fear = 0;
+      state.fly.curiosity = 40 + Math.random() * 30;
+      state.fly.alive = true;
+      state.fly.target = null;
+      state.fly.action = 'explorar';
+      state.fly.thought = '';
+      state.sprayActive = false;
+      state.handActive = false;
+      state.windowClosed = false;
+      document.getElementById('death-screen').classList.remove('show');
+      createWorld();
+    }
+
+    // ===================== MEMORY =====================
+    function saveMemory(cause, thought) {
+      state.memories.push({
+        life: state.life,
+        cause,
+        thought,
+        time: Date.now()
+      });
+      if (state.memories.length > 30) state.memories.shift();
+      localStorage.setItem('fly_memories', JSON.stringify(state.memories));
+      updateMemCount();
+    }
+
+    function updateMemCount() {
+      document.getElementById('mem-count').textContent = state.memories.length;
+    }
+
+    // ===================== BRAIN =====================
+    async function decide() {
+      if (!state.fly.alive) return;
+
+      const memoriesText = state.memories.slice(-8).map(m =>
+        `Vida ${m.life}: morreu por "${m.cause}" — pensou: "${m.thought}"`
+      ).join('\n') || 'Nenhuma morte ainda.';
+
+      const prompt = `Você é o cérebro de uma mosca. Responda APENAS com um JSON válido, sem markdown.
+
+Estado atual:
+- Energia: ${state.fly.energy.toFixed(0)}
+- Fome: ${state.fly.hunger.toFixed(0)}
+- Medo: ${state.fly.fear.toFixed(0)}
+- Curiosidade: ${state.fly.curiosity.toFixed(0)}
+- Spray ativo: ${state.sprayActive}
+- Janela fechada: ${state.windowClosed}
+- Mão ativa: ${state.handActive}
+
+Memórias de mortes anteriores (aprenda com elas):
+${memoriesText}
+
+Objetos no mundo: açúcar, fruta, luz, lixo, janela.
+
+Escolha UMA ação: "ir_acucar", "ir_fruta", "ir_luz", "ir_lixo", "ir_janela", "fugir", "explorar", "descansar".
+
+Responda exatamente neste formato:
+{"action":"...","thought":"pensamento curto da mosca em português"}`;
+
+      if (state.apiKey) {
+        try {
+          const res = await fetch('https://api.x.ai/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${state.apiKey}`
+            },
+            body: JSON.stringify({
+              model: 'grok-3',
+              messages: [{ role: 'user', content: prompt }],
+              temperature: 0.8,
+              max_tokens: 120
+            })
+          });
+          if (!res.ok) throw new Error('API error');
+          const data = await res.json();
+          const text = data.choices?.[0]?.message?.content || '';
+          const match = text.match(/\{[\s\S]*\}/);
+          if (match) {
+            const parsed = JSON.parse(match[0]);
+            state.fly.action = parsed.action || 'explorar';
+            state.fly.thought = parsed.thought || '';
+            showThought(state.fly.thought);
+            setTargetFromAction(state.fly.action);
+            return;
+          }
+        } catch (e) {
+          console.warn('Grok falhou, usando modo simulado', e);
+        }
+      }
+
+      // Modo simulado (fallback inteligente com memória)
+      simulatedBrain();
+    }
+
+    function simulatedBrain() {
+      const f = state.fly;
+      let action = 'explorar';
+      let thought = 'Hmm...';
+
+      // Aprendizado simples baseado em memórias
+      const diedBySpray = state.memories.some(m => m.cause.includes('spray'));
+      const diedByHand = state.memories.some(m => m.cause.includes('mão') || m.cause.includes('mao'));
+      const diedByWindow = state.memories.some(m => m.cause.includes('janela'));
+
+      if (state.sprayActive && diedBySpray) {
+        action = 'fugir';
+        thought = 'Spray! Já morri com isso antes, foge!';
+      } else if (state.handActive && diedByHand) {
+        action = 'fugir';
+        thought = 'Mão perigosa... já aprendi.';
+      } else if (state.windowClosed && diedByWindow) {
+        action = 'fugir';
+        thought = 'Janela fechada me matou antes.';
+      } else if (f.fear > 60) {
+        action = 'fugir';
+        thought = 'Estou com medo...';
+      } else if (f.hunger > 70) {
+        action = Math.random() > 0.5 ? 'ir_acucar' : 'ir_fruta';
+        thought = 'Estou com tanta fome...';
+      } else if (f.curiosity > 70) {
+        action = 'ir_luz';
+        thought = 'Aquela luz é interessante.';
+      } else if (f.energy < 30) {
+        action = 'descansar';
+        thought = 'Preciso descansar um pouco.';
+      } else {
+        const opts = ['ir_acucar', 'ir_fruta', 'ir_lixo', 'explorar'];
+        action = opts[Math.floor(Math.random() * opts.length)];
+        thought = 'Vou explorar um pouco.';
+      }
+
+      f.action = action;
+      f.thought = thought;
+      showThought(thought);
+      setTargetFromAction(action);
+    }
+
+    function setTargetFromAction(action) {
+      const map = {
+        ir_acucar: 'sugar',
+        ir_fruta: 'fruit',
+        ir_luz: 'light',
+        ir_lixo: 'trash',
+        ir_janela: 'window'
+      };
+      if (map[action]) {
+        const obj = state.objects.find(o => o.type === map[action]);
+        state.fly.target = obj || null;
+      } else {
+        state.fly.target = null;
+      }
+    }
+
+    function showThought(text) {
+      const el = document.getElementById('thought');
+      el.textContent = text;
+      el.style.display = 'block';
+      clearTimeout(window._thoughtTimer);
+      window._thoughtTimer = setTimeout(() => el.style.display = 'none', 4000);
+    }
+
+    // ===================== UPDATE =====================
+    function update(dt) {
+      if (!state.fly.alive) return;
+      const f = state.fly;
+      const w = canvas.offsetWidth;
+      const h = canvas.offsetHeight;
+
+      // Necessidades
+      f.hunger = Math.min(100, f.hunger + dt * 3);
+      f.energy = Math.max(0, f.energy - dt * 1.5);
+      f.curiosity = Math.max(0, f.curiosity - dt * 2);
+      if (f.fear > 0) f.fear = Math.max(0, f.fear - dt * 8);
+
+      // Spray
+      if (state.sprayActive) {
+        state.sprayTimer -= dt;
+        f.fear = Math.min(100, f.fear + dt * 40);
+        if (state.sprayTimer <= 0) state.sprayActive = false;
+        // Chance de morrer se perto do spray (centro)
+        const dx = f.x - w/2, dy = f.y - h/2;
+        if (Math.hypot(dx, dy) < 120 && Math.random() < 0.02) {
+          killFly('spray venenoso');
+          return;
+        }
+      }
+
+      // Mão
+      if (state.handActive) {
+        state.handTimer -= dt;
+        f.fear = Math.min(100, f.fear + dt * 50);
+        if (state.handTimer <= 0) state.handActive = false;
+      }
+
+      // Movimento
+      let ax = 0, ay = 0;
+
+      if (f.action === 'fugir') {
+        // Foge do centro / da mão
+        ax = (f.x - w/2) * 0.01;
+        ay = (f.y - h/2) * 0.01;
+        f.vx += ax * 4;
+        f.vy += ay * 4;
+      } else if (f.target) {
+        const dx = f.target.x - f.x;
+        const dy = f.target.y - f.y;
+        const dist = Math.hypot(dx, dy) || 1;
+        ax = dx / dist * 0.8;
+        ay = dy / dist * 0.8;
+        f.vx += ax;
+        f.vy += ay;
+
+        // Chegou?
+        if (dist < f.target.r + 10) {
+          if (f.target.type === 'sugar' || f.target.type === 'fruit') {
+            f.hunger = Math.max(0, f.hunger - 40);
+            f.energy = Math.min(100, f.energy + 20);
+            showThought('Que delícia!');
+          }
+          if (f.target.type === 'window' && state.windowClosed) {
+            killFly('bateu na janela fechada');
+            return;
+          }
+        }
+      } else {
+        // Explorar / voar aleatório
+        f.vx += (Math.random() - 0.5) * 0.4;
+        f.vy += (Math.random() - 0.5) * 0.4;
+      }
+
+      // Limites de velocidade
+      const speed = Math.hypot(f.vx, f.vy);
+      const maxSpeed = f.action === 'fugir' ? 6 : 3.5;
+      if (speed > maxSpeed) {
+        f.vx = f.vx / speed * maxSpeed;
+        f.vy = f.vy / speed * maxSpeed;
+      }
+
+      f.x += f.vx;
+      f.y += f.vy;
+      f.vx *= 0.96;
+      f.vy *= 0.96;
+
+      // Bordas
+      if (f.x < 15) { f.x = 15; f.vx *= -0.6; }
+      if (f.x > w - 15) { f.x = w - 15; f.vx *= -0.6; }
+      if (f.y < 15) { f.y = 15; f.vy *= -0.6; }
+      if (f.y > h - 15) { f.y = h - 15; f.vy *= -0.6; }
+
+      f.angle = Math.atan2(f.vy, f.vx);
+
+      // Morte por energia
+      if (f.energy <= 0) {
+        killFly('exaurida de tanto voar');
+        return;
+      }
+
+      // Decisão periódica
+      state.lastDecision += dt;
+      if (state.lastDecision > 4.5) {
+        state.lastDecision = 0;
+        decide();
+      }
+    }
+
+    function killFly(cause) {
+      if (!state.fly.alive) return;
+      state.fly.alive = false;
+
+      const thought = state.fly.thought || 'Não vi isso chegando...';
+      const finalThought = generateDeathThought(cause, thought);
+
+      saveMemory(cause, finalThought);
+
+      document.getElementById('life-count').textContent = state.life;
+      document.getElementById('death-thought').textContent = '"' + finalThought + '"';
+      document.getElementById('death-screen').classList.add('show');
+    }
+
+    function generateDeathThought(cause, lastThought) {
+      // Se tiver API, poderia chamar de novo, mas usamos o último pensamento + causa
+      const templates = [
+        `Porra... ${cause}. Eu só queria...`,
+        `Não acredito. Morri por ${cause}.`,
+        `Eu sabia que era perigoso, mas... ${cause}.`,
+        `Última coisa que pensei: "${lastThought}". Aí veio ${cause}.`
+      ];
+      if (state.memories.length > 2) {
+        return `Já tinha morrido antes, mas dessa vez foi ${cause}. Maldita seja.`;
+      }
+      return templates[Math.floor(Math.random() * templates.length)];
+    }
+
+    // ===================== DRAW =====================
+    function draw() {
+      const w = canvas.offsetWidth;
+      const h = canvas.offsetHeight;
+      ctx.clearRect(0, 0, w, h);
+
+      // Chão
+      ctx.fillStyle = '#3a3a3a';
+      ctx.fillRect(0, 0, w, h);
+
+      // Janela
+      ctx.fillStyle = state.windowClosed ? '#555' : '#87ceeb';
+      ctx.fillRect(20, h * 0.15, 70, 90);
+      ctx.strokeStyle = '#222';
+      ctx.lineWidth = 4;
+      ctx.strokeRect(20, h * 0.15, 70, 90);
+
+      // Objetos
+      state.objects.forEach(o => {
+        ctx.font = '28px serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(o.label, o.x, o.y);
+      });
+
+      // Spray efeito
+      if (state.sprayActive) {
+        ctx.fillStyle = 'rgba(100, 200, 100, 0.25)';
+        ctx.beginPath();
+        ctx.arc(w/2, h/2, 130, 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // Mão
+      if (state.handActive) {
+        ctx.font = '40px serif';
+        ctx.fillText('🤚', w/2, h/2);
+      }
+
+      // Mosca
+      if (state.fly.alive) {
+        const f = state.fly;
+        ctx.save();
+        ctx.translate(f.x, f.y);
+        ctx.rotate(f.angle);
+
+        // Corpo
+        ctx.fillStyle = '#222';
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 8, 5, 0, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Asas
+        ctx.fillStyle = 'rgba(200,200,255,0.5)';
+        ctx.beginPath();
+        ctx.ellipse(-4, -6, 7, 3, -0.4, 0, Math.PI * 2);
+        ctx.ellipse(-4, 6, 7, 3, 0.4, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Cabeça
+        ctx.fillStyle = '#111';
+        ctx.beginPath();
+        ctx.arc(7, 0, 4, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
+      }
+
+      // HUD
+      const f = state.fly;
+      document.getElementById('hud').innerHTML = `
+        Vida: ${state.life}<br>
+        Energia: ${f.energy.toFixed(0)}<br>
+        Fome: ${f.hunger.toFixed(0)}<br>
+        Medo: ${f.fear.toFixed(0)}<br>
+        Ação: ${f.action}<br>
+        Memórias: ${state.memories.length}
+      `;
+    }
+
+    // ===================== LOOP =====================
+    let last = performance.now();
+    function loop(now) {
+      const dt = Math.min((now - last) / 1000, 0.05);
+      last = now;
+      update(dt);
+      draw();
+      requestAnimationFrame(loop);
+    }
+
+    // ===================== EVENTS =====================
+    document.getElementById('btn-spray').onclick = () => {
+      if (!state.fly.alive) return;
+      state.sprayActive = true;
+      state.sprayTimer = 3.5;
+      state.fly.fear = Math.min(100, state.fly.fear + 40);
+    };
+
+    document.getElementById('btn-window').onclick = () => {
+      state.windowClosed = !state.windowClosed;
+    };
+
+    document.getElementById('btn-hand').onclick = () => {
+      if (!state.fly.alive) return;
+      state.handActive = true;
+      state.handTimer = 1.8;
+      // Chance de acertar
+      const f = state.fly;
+      const w = canvas.offsetWidth, h = canvas.offsetHeight;
+      const dist = Math.hypot(f.x - w/2, f.y - h/2);
+      if (dist < 90 && Math.random() < 0.55) {
+        killFly('esmagada pela mão');
+      }
+    };
+
+    // Clique na tela tenta matar com a mão
+    canvas.addEventListener('click', (e) => {
+      if (!state.fly.alive) return;
+      const rect = canvas.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      const f = state.fly;
+      if (Math.hypot(x - f.x, y - f.y) < 40) {
+        state.handActive = true;
+        state.handTimer = 1.2;
+        if (Math.random() < 0.65) killFly('esmagada pela mão');
+      }
+    });
+
+    document.getElementById('btn-revive').onclick = () => {
+      state.life++;
+      spawnFly();
+      // Pequeno delay e já pensa
+      setTimeout(decide, 800);
+    };
+
+    document.getElementById('btn-settings').onclick = () => {
+      document.getElementById('api-key').value = state.apiKey;
+      updateMemCount();
+      document.getElementById('modal').classList.add('show');
+    };
+
+    document.getElementById('btn-close-modal').onclick = () => {
+      document.getElementById('modal').classList.remove('show');
+    };
+
+    document.getElementById('btn-save-key').onclick = () => {
+      state.apiKey = document.getElementById('api-key').value.trim();
+      localStorage.setItem('grok_key', state.apiKey);
+      document.getElementById('modal').classList.remove('show');
+      alert(state.apiKey ? 'Chave salva! Agora usa Grok de verdade.' : 'Modo simulado ativo.');
+    };
+
+    document.getElementById('btn-clear-mem').onclick = () => {
+      if (confirm('Apagar todas as memórias de morte?')) {
+        state.memories = [];
+        localStorage.removeItem('fly_memories');
+        updateMemCount();
+      }
+    };
+
+    // Start
+    spawnFly();
+    updateMemCount();
+    setTimeout(decide, 1000);
+    requestAnimationFrame(loop);
+  </script>
+</body>
+</html>
